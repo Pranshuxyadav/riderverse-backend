@@ -156,12 +156,13 @@ app.get('/auth/strava/callback', async (req, res) => {
     const sessionId = crypto.randomBytes(32).toString('hex');
     sessions.set(sessionId, data.id);
 
-    // ✅ Fixed cookie config for dev/prod
+    // Always set cookie for cross-site (Netlify → Railway)
     res.cookie('session_id', sessionId, {
-      httpOnly: true,
-      sameSite: IS_PROD ? 'none' : 'lax',
-      secure: IS_PROD,
+    httpOnly: true,
+    sameSite: 'none',
+    secure: true
     });
+
 
     res.send(`
       <h1>✅ Strava Connected!</h1>
