@@ -84,26 +84,32 @@ async function getAccessTokenForUser(user) {
 
 // ---------- Routes ----------
 
-// 1) start OAuth with Strava
+// 1) Start OAuth with Strava
 app.get('/auth/strava', (req, res) => {
   const url = new URL('https://www.strava.com/oauth/authorize');
   url.searchParams.set('client_id', CLIENT_ID);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', REDIRECT_URI);
+  url.searchParams.set('redirect_uri', REDIRECT_URI); // must match callback token request
   url.searchParams.set('approval_prompt', 'auto');
   url.searchParams.set('scope', 'read,activity:read_all');
 
   res.redirect(url.toString());
 });
 
-// 2) callback from Strava
+// 2) Callback from Strava
 app.get('/auth/strava/callback', async (req, res) => {
   const { code, error } = req.query;
+
   if (error) {
     return res.status(400).send('Strava error: ' + error);
   }
 
+  if (!code) {
+    return res.status(400).send('Missing authorization code from Strava');
+  }
+
   try {
+    // Exchange code for tokens
     const response = await axios.post(
       'https://www.strava.com/oauth/token',
       {
@@ -111,23 +117,25 @@ app.get('/auth/strava/callback', async (req, res) => {
         client_secret: CLIENT_SECRET,
         code,
         grant_type: 'authorization_code',
+        redirect_uri: REDIRECT_URI // MUST be identical to /auth/strava
       }
     );
 
     const { access_token, refresh_token, expires_at, athlete } = response.data;
 
-    // upsert user by athlete_id in Supabase
+    // Upsert user by athlete_id in Supabase
     const { data, error: dbError } = await supabase
       .from('users')
-      .upsert({
-        athlete_id: athlete.id,
-        access_token,
-        refresh_token,
-        expires_at,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'athlete_id'
-      })
+      .upsert(
+        {
+          athlete_id: athlete.id,
+          access_token,
+          refresh_token,
+          expires_at,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'athlete_id' }
+      )
       .select()
       .single();
 
@@ -136,14 +144,15 @@ app.get('/auth/strava/callback', async (req, res) => {
       return res.status(500).send('DB error while saving user');
     }
 
-    // create session
+    // Create in‑memory session
     const sessionId = crypto.randomBytes(32).toString('hex');
     sessions.set(sessionId, data.id);
 
-    // set httpOnly cookie
+    // Set httpOnly cookie so frontend can call /api/my-activities
     res.cookie('session_id', sessionId, {
       httpOnly: true,
       sameSite: 'lax'
+      // secure: true   // add this once you are fully on HTTPS frontend as well
     });
 
     res.send(
@@ -154,7 +163,6 @@ app.get('/auth/strava/callback', async (req, res) => {
     res.status(500).send('Error exchanging token with Strava');
   }
 });
-
 // optional: who am I
 app.get('/api/me', async (req, res) => {
   const user = await getUserFromRequest(req);
