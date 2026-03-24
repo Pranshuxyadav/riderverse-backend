@@ -163,6 +163,8 @@ app.get('/auth/strava/callback', async (req, res) => {
     secure: true
     });
 
+    console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
+
 
     res.send(`
       <h1>✅ Strava Connected!</h1>
