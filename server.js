@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
+const cookieParser = require('cookie-parser'); // still fine to keep
 const { supabase } = require('./supabaseClient');
 
 const CLIENT_ID = process.env.STRAVA_CLIENT_ID;
@@ -12,8 +12,7 @@ const REDIRECT_URI = process.env.STRAVA_REDIRECT_URI;
 
 const app = express();
 
-// Environment config
-const IS_PROD = process.env.NODE_ENV === 'production';
+// Environment + CORS
 const FRONTEND_ORIGIN = 'https://classy-jalebi-dabf36.netlify.app';
 
 app.use(cors({
@@ -23,16 +22,20 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json());
 
-// session_id (cookie) -> user.id (uuid in Supabase)
+// session_id (header token) -> user.id (uuid in Supabase)
 const sessions = new Map();
 
 // ---------- Helpers ----------
 
-// read current user from session cookie
+// read current user from Authorization header: "Session <id>"
 async function getUserFromRequest(req) {
-  const sid = req.cookies.session_id;
+  const auth = req.get('authorization') || '';
+  const prefix = 'Session ';
+  if (!auth.startsWith(prefix)) return null;
+
+  const sid = auth.slice(prefix.length).trim();
   if (!sid) return null;
-  
+
   const userId = sessions.get(sid);
   if (!userId) return null;
 
@@ -69,7 +72,7 @@ async function getAccessTokenForUser(user) {
 
     const { access_token, refresh_token, expires_at } = resp.data;
 
-    // update user in Supabase (Supabase v2 syntax)
+    // update user in Supabase
     const { error } = await supabase
       .from('users')
       .update({
@@ -132,7 +135,7 @@ app.get('/auth/strava/callback', async (req, res) => {
 
     const { access_token, refresh_token, expires_at, athlete } = response.data;
 
-    // ✅ CORRECT Supabase v2 upsert syntax
+    // Upsert user by athlete_id in Supabase
     const { data, error: dbError } = await supabase
       .from('users')
       .upsert({
@@ -141,8 +144,8 @@ app.get('/auth/strava/callback', async (req, res) => {
         refresh_token,
         expires_at,
         updated_at: new Date().toISOString()
-      }, { 
-        onConflict: 'athlete_id' 
+      }, {
+        onConflict: 'athlete_id'
       })
       .select()
       .single();
@@ -156,21 +159,14 @@ app.get('/auth/strava/callback', async (req, res) => {
     const sessionId = crypto.randomBytes(32).toString('hex');
     sessions.set(sessionId, data.id);
 
-    // Always set cookie for cross-site (Netlify → Railway)
-    res.cookie('session_id', sessionId, {
-    httpOnly: true,
-    sameSite: 'none',
-    secure: true
-    });
-
-    console.log('Set-Cookie header:', res.getHeader('Set-Cookie'));
-
+    // Redirect back to frontend with session in URL fragment (not sent to Strava or logs)
+    const redirectTo = `${FRONTEND_ORIGIN}/#session=${sessionId}`;
 
     res.send(`
       <h1>✅ Strava Connected!</h1>
-      <p>You can close this tab and go back to RiderVerse.</p>
+      <p>You can close this tab. Redirecting you back to RiderVerse…</p>
       <script>
-        setTimeout(() => window.close(), 3000);
+        window.location.href = ${JSON.stringify(redirectTo)};
       </script>
     `);
   } catch (err) {
@@ -186,10 +182,10 @@ app.get('/api/me', async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'Not logged in via Strava' });
     }
-    res.json({ 
+    res.json({
       athlete_id: user.athlete_id,
       firstname: user.firstname,
-      lastname: user.lastname 
+      lastname: user.lastname
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -210,8 +206,8 @@ app.get('/api/my-activities', async (req, res) => {
       'https://www.strava.com/api/v3/athlete/activities',
       {
         headers: { Authorization: `Bearer ${accessToken}` },
-        params: { 
-          per_page: 10, 
+        params: {
+          per_page: 10,
           page: 1,
           after: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60) // last 30 days
         },
@@ -240,7 +236,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// 404 handler compatible with Express 5
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
@@ -249,5 +245,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📱 Frontend: ${FRONTEND_ORIGIN}`);
-  console.log(`🔒 Production mode: ${IS_PROD}`);
 });
