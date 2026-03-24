@@ -13,8 +13,10 @@ const REDIRECT_URI = process.env.STRAVA_REDIRECT_URI;
 const app = express();
 
 // allow frontend to send cookies
+const FRONTEND_ORIGIN = 'https://classy-jalebi-dabf36.netlify.app';
+
 app.use(cors({
-  origin: true,
+  origin: FRONTEND_ORIGIN,
   credentials: true
 }));
 app.use(cookieParser());
@@ -150,9 +152,9 @@ app.get('/auth/strava/callback', async (req, res) => {
 
     // Set httpOnly cookie so frontend can call /api/my-activities
     res.cookie('session_id', sessionId, {
-      httpOnly: true,
-      sameSite: 'lax'
-      // secure: true // enable once frontend is HTTPS on a real domain
+    httpOnly: true,
+    sameSite: 'none',
+    secure: true
     });
 
     res.send(
