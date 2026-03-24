@@ -89,7 +89,7 @@ app.get('/auth/strava', (req, res) => {
   const url = new URL('https://www.strava.com/oauth/authorize');
   url.searchParams.set('client_id', CLIENT_ID);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', REDIRECT_URI); // must match callback token request
+  url.searchParams.set('redirect_uri', REDIRECT_URI); // must be .../auth/strava/callback
   url.searchParams.set('approval_prompt', 'auto');
   url.searchParams.set('scope', 'read,activity:read_all');
 
@@ -117,7 +117,7 @@ app.get('/auth/strava/callback', async (req, res) => {
         client_secret: CLIENT_SECRET,
         code,
         grant_type: 'authorization_code',
-        redirect_uri: REDIRECT_URI // MUST be identical to /auth/strava
+        redirect_uri: REDIRECT_URI
       }
     );
 
@@ -152,7 +152,7 @@ app.get('/auth/strava/callback', async (req, res) => {
     res.cookie('session_id', sessionId, {
       httpOnly: true,
       sameSite: 'lax'
-      // secure: true   // add this once you are fully on HTTPS frontend as well
+      // secure: true // enable once frontend is HTTPS on a real domain
     });
 
     res.send(
@@ -163,6 +163,7 @@ app.get('/auth/strava/callback', async (req, res) => {
     res.status(500).send('Error exchanging token with Strava');
   }
 });
+
 // optional: who am I
 app.get('/api/me', async (req, res) => {
   const user = await getUserFromRequest(req);
